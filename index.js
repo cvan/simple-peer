@@ -1,5 +1,6 @@
 module.exports = Peer
 
+var events = require('events')
 var debug = require('debug')('simple-peer')
 var dezalgo = require('dezalgo')
 var extend = require('xtend/mutable')
@@ -7,7 +8,6 @@ var hat = require('hat')
 var inherits = require('inherits')
 var isTypedArray = require('is-typedarray')
 var once = require('once')
-var stream = require('stream')
 var toBuffer = require('typedarray-to-buffer')
 
 var RTCPeerConnection = typeof window !== 'undefined' &&
@@ -25,7 +25,7 @@ var RTCIceCandidate = typeof window !== 'undefined' &&
   || window.RTCIceCandidate
   || window.webkitRTCIceCandidate)
 
-inherits(Peer, stream.Duplex)
+inherits(Peer, events.EventEmitter)
 
 /**
  * A WebRTC peer connection.
@@ -37,11 +37,10 @@ function Peer (opts) {
   if (!opts) opts = {}
 
   opts.allowHalfOpen = false
-  stream.Duplex.call(self, opts)
+  events.EventEmitter.call(self, opts)
 
   extend(self, {
     initiator: false,
-    stream: false,
     config: Peer.config,
     constraints: Peer.constraints,
     channelName: (opts && opts.initiator) ? hat(160) : null,
@@ -63,9 +62,6 @@ function Peer (opts) {
   self._pc.oniceconnectionstatechange = self._onIceConnectionStateChange.bind(self)
   self._pc.onsignalingstatechange = self._onSignalingStateChange.bind(self)
   self._pc.onicecandidate = self._onIceCandidate.bind(self)
-
-  if (self.stream) self._setupVideo(self.stream)
-  self._pc.onaddstream = self._onAddStream.bind(self)
 
   if (self.initiator) {
     self._setupData({ channel: self._pc.createDataChannel(self.channelName) })
@@ -187,11 +183,6 @@ Peer.prototype.destroy = function (err, onclose) {
   self._pc = null
   self._channel = null
 
-  this.readable = this.writable = false
-
-  if (!self._readableState.ended) self.push(null)
-  if (!self._writableState.finished) self.end()
-
   if (err) self.emit('error', err)
   self.emit('close')
 }
@@ -205,11 +196,6 @@ Peer.prototype._setupData = function (event) {
   self._channel.onmessage = self._onChannelMessage.bind(self)
   self._channel.onopen = self._onChannelOpen.bind(self)
   self._channel.onclose = self._onChannelClose.bind(self)
-}
-
-Peer.prototype._setupVideo = function (stream) {
-  var self = this
-  self._pc.addStream(stream)
 }
 
 Peer.prototype._read = function () {}
@@ -353,13 +339,6 @@ Peer.prototype._onChannelClose = function () {
   if (self.destroyed) return
   self._debug('on channel close')
   self.destroy()
-}
-
-Peer.prototype._onAddStream = function (event) {
-  var self = this
-  if (self.destroyed) return
-  self._debug('on add stream')
-  self.emit('stream', event.stream)
 }
 
 Peer.prototype._onError = function (err) {
